@@ -1,7 +1,20 @@
+// export interface Course {
+//   id: string;
+//   name: string;
+//   courseId: string;
+//   totalHours: number;
+//   presentHours: number;
+//   color: string;
+//   createdAt: Date;
+// }
+
 export interface Course {
-  id: string;
-  name: string;
+  id: number;
   courseId: string;
+  courseName: string;
+  department: string;
+  year: string;
+  semester: string;
   totalHours: number;
   presentHours: number;
   color: string;

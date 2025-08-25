@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
 import { Plus, Minus, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle } from 'lucide-react-native';
 import { Course } from '@/types';
 
@@ -7,13 +7,15 @@ interface AttendanceCardProps {
   onIncrement: (type: 'total' | 'present') => void;
   onDecrement: (type: 'total' | 'present') => void;
   requiredPercentage: number;
+  onLongPress: () => void;
 }
 
 export default function AttendanceCard({ 
   course, 
   onIncrement, 
   onDecrement, 
-  requiredPercentage 
+  requiredPercentage,
+  onLongPress
 }: AttendanceCardProps) {
   const percentage = course.totalHours > 0 ? (course.presentHours / course.totalHours) * 100 : 0;
   const isLow = percentage < requiredPercentage;
@@ -32,10 +34,10 @@ export default function AttendanceCard({
   const bunkableClasses = calculateBunkableClasses();
 
   return (
-    <View style={[styles.container, { borderLeftColor: course.color }]}>
+    <TouchableOpacity activeOpacity={0.8}  style={[styles.container, { borderLeftColor: course.color }]} onLongPress={onLongPress}>
       <View style={styles.header}>
         <View style={styles.courseInfo}>
-          <Text style={styles.courseName}>{course.name}</Text>
+          <Text style={styles.courseName}>{course.courseName}</Text>
           <Text style={styles.courseId}>{course.courseId}</Text>
         </View>
         <View style={styles.percentageContainer}>
@@ -103,7 +105,7 @@ export default function AttendanceCard({
           </Text>
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 }
 

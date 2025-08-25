@@ -1,82 +1,153 @@
-import { View, Text, StyleSheet, ScrollView, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
-import { TrendingUp, TrendingDown, Calendar, Target } from 'lucide-react-native';
+import {
+  TrendingUp,
+  TrendingDown,
+  Calendar,
+  Target,
+} from 'lucide-react-native';
 import { Course } from '@/types';
 import { useStorage } from '@/hooks/useStorage';
 import Header from '@/components/Header';
+import { useCallback, useState } from 'react';
 
 const screenWidth = Dimensions.get('window').width;
 
 export default function Analytics() {
-  const { value: courses } = useStorage<Course[]>('courses', []);
+  const { value: courses, loadValue } = useStorage<Course[]>('userCourses', []);
   const { value: requiredPercentage } = useStorage('requiredPercentage', 75);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const generateTrendData = () => {
-    if (courses.length === 0) {
+  const generateTrendData = useCallback(() => {
+    if (!courses || courses.length === 0) {
       return {
         labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-        datasets: [{
-          data: [0, 0, 0, 0],
-          color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
-          strokeWidth: 2,
-        }]
+        datasets: [
+          {
+            data: [0, 0, 0, 0],
+            color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
+            strokeWidth: 2,
+          },
+        ],
       };
     }
 
-    // Simulate weekly attendance data
+    // Calculate current overall attendance
+    const overallAttendance =
+      courses.reduce((sum, course) => {
+        const percentage =
+          course.totalHours > 0
+            ? (course.presentHours / course.totalHours) * 100
+            : 0;
+        return sum + percentage;
+      }, 0) / courses.length;
+
+    // Generate trend data with some realistic variation
     const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
     const trendData = weeks.map((_, index) => {
-      const weeklyAttendance = courses.reduce((sum, course) => {
-        const percentage = course.totalHours > 0 ? (course.presentHours / course.totalHours) * 100 : 0;
-        // Simulate slight variation in weekly data
-        const variation = (Math.random() - 0.5) * 10;
-        return sum + Math.max(0, Math.min(100, percentage + variation));
-      }, 0) / courses.length;
-      
-      return Math.round(weeklyAttendance);
+      // Create a trend that leads to current attendance
+      const baseAttendance = Math.max(0, overallAttendance - (3 - index) * 5);
+      const variation = (Math.random() - 0.5) * 8; // ±4% variation
+      return Math.round(Math.max(0, Math.min(100, baseAttendance + variation)));
     });
+
+    // Ensure last data point is close to actual attendance
+    trendData[3] = Math.round(overallAttendance);
 
     return {
       labels: weeks,
-      datasets: [{
-        data: trendData,
-        color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
-        strokeWidth: 3,
-      }]
+      datasets: [
+        {
+          data: trendData,
+          color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
+          strokeWidth: 3,
+        },
+      ],
     };
-  };
+  }, [courses]);
 
   const chartData = generateTrendData();
-  const currentAverage = courses.length > 0 
-    ? courses.reduce((sum, course) => {
-        const percentage = course.totalHours > 0 ? (course.presentHours / course.totalHours) * 100 : 0;
-        return sum + percentage;
-      }, 0) / courses.length
-    : 0;
 
-  const lastWeekAverage = chartData.datasets[0].data[chartData.datasets[0].data.length - 2] || 0;
+  const totalHours = courses.reduce(
+    (sum, course) => sum + course.totalHours,
+    0
+  );
+  const totalPresentHours = courses.reduce(
+    (sum, course) => sum + course.presentHours,
+    0
+  );
+
+  const realAverage =
+    totalHours > 0 ? (totalPresentHours / totalHours) * 100 : 0;
+  const currentAverage =
+    courses.length > 0
+      ? courses.reduce((sum, course) => {
+          const percentage =
+            course.totalHours > 0
+              ? (course.presentHours / course.totalHours) * 100
+              : 0;
+          return sum + percentage;
+        }, 0) / courses.length
+      : 0;
+
+  const lastWeekAverage =
+    chartData.datasets[0].data[chartData.datasets[0].data.length - 2] || 0;
   const trend = currentAverage - lastWeekAverage;
   const isPositiveTrend = trend >= 0;
 
-  const coursesAboveTarget = courses.filter(course => {
-    const percentage = course.totalHours > 0 ? (course.presentHours / course.totalHours) * 100 : 0;
+  const coursesAboveTarget = courses.filter((course) => {
+    const percentage =
+      course.totalHours > 0
+        ? (course.presentHours / course.totalHours) * 100
+        : 0;
     return percentage >= requiredPercentage;
   }).length;
 
-  const totalHours = courses.reduce((sum, course) => sum + course.totalHours, 0);
-  const totalPresentHours = courses.reduce((sum, course) => sum + course.presentHours, 0);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Add any refresh logic here
+      await loadValue();
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  // const fetchData = async () =>{
+  //   try {
+  //     await loadValue();
+  //     console.log('Data fetched successfully');
+  //   } catch (error) {
+  //     console.error('Error fetching data:', error);
+  //   }
+
+  // }
+  // fetchData();
 
   return (
     <View style={styles.container}>
       <Header title="Analytics" subtitle="Track your attendance trends" />
-      
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#2563EB']}
+            tintColor="#2563EB"
+          />
+        }
+      >
         <View style={styles.metricsContainer}>
           <View style={styles.metricCard}>
             <View style={[styles.metricIcon, { backgroundColor: '#EFF6FF' }]}>
               <Target size={20} color="#2563EB" />
             </View>
-            <Text style={styles.metricValue}>{currentAverage.toFixed(1)}%</Text>
+            <Text style={styles.metricValue}>{realAverage.toFixed(1)}%</Text>
             <Text style={styles.metricLabel}>Overall Average</Text>
             <View style={styles.trendContainer}>
               {isPositiveTrend ? (
@@ -84,7 +155,12 @@ export default function Analytics() {
               ) : (
                 <TrendingDown size={16} color="#DC2626" />
               )}
-              <Text style={[styles.trendText, { color: isPositiveTrend ? '#059669' : '#DC2626' }]}>
+              <Text
+                style={[
+                  styles.trendText,
+                  { color: isPositiveTrend ? '#059669' : '#DC2626' },
+                ]}
+              >
                 {Math.abs(trend).toFixed(1)}%
               </Text>
             </View>
@@ -136,24 +212,24 @@ export default function Analytics() {
 
         <View style={styles.summaryContainer}>
           <Text style={styles.summaryTitle}>Summary</Text>
-          
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Total Classes:</Text>
             <Text style={styles.summaryValue}>{totalHours}</Text>
           </View>
-          
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Classes Attended:</Text>
             <Text style={styles.summaryValue}>{totalPresentHours}</Text>
           </View>
-          
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Classes Missed:</Text>
             <Text style={[styles.summaryValue, { color: '#DC2626' }]}>
               {totalHours - totalPresentHours}
             </Text>
           </View>
-          
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Target Percentage:</Text>
             <Text style={styles.summaryValue}>{requiredPercentage}%</Text>
@@ -163,36 +239,46 @@ export default function Analytics() {
         {courses.length > 0 && (
           <View style={styles.courseBreakdown}>
             <Text style={styles.breakdownTitle}>Course Breakdown</Text>
-            {courses.map(course => {
-              const percentage = course.totalHours > 0 ? (course.presentHours / course.totalHours) * 100 : 0;
+            {courses.map((course) => {
+              const percentage =
+                course.totalHours > 0
+                  ? (course.presentHours / course.totalHours) * 100
+                  : 0;
               const isAboveTarget = percentage >= requiredPercentage;
-              
+
               return (
                 <View key={course.id} style={styles.courseItem}>
                   <View style={styles.courseHeader}>
                     <View style={styles.courseInfo}>
-                      <Text style={styles.courseName}>{course.name}</Text>
+                      <Text style={styles.courseName}>{course.courseName}</Text>
                       <Text style={styles.courseId}>{course.courseId}</Text>
                     </View>
-                    <Text style={[styles.coursePercentage, { color: isAboveTarget ? '#059669' : '#DC2626' }]}>
+                    <Text
+                      style={[
+                        styles.coursePercentage,
+                        { color: isAboveTarget ? '#059669' : '#DC2626' },
+                      ]}
+                    >
                       {percentage.toFixed(1)}%
                     </Text>
                   </View>
                   <View style={styles.progressBar}>
-                    <View 
+                    <View
                       style={[
-                        styles.progress, 
-                        { 
+                        styles.progress,
+                        {
                           width: `${Math.min(percentage, 100)}%`,
-                          backgroundColor: isAboveTarget ? '#059669' : '#DC2626'
-                        }
-                      ]} 
+                          backgroundColor: isAboveTarget
+                            ? '#059669'
+                            : '#DC2626',
+                        },
+                      ]}
                     />
-                    <View 
+                    <View
                       style={[
                         styles.targetLine,
-                        { left: `${requiredPercentage}%` }
-                      ]} 
+                        { left: `${requiredPercentage}%` },
+                      ]}
                     />
                   </View>
                   <Text style={styles.courseStats}>

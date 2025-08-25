@@ -2,18 +2,17 @@ import { Link, Stack } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
+import { Redirect, Href } from "expo-router";
+const PATH = "/(tabs)" as Href;
 
 export default function NotFoundScreen() {
   const router = useRouter();
-  useEffect(() => {
-    router.replace('/');
-  }, [])
   return (
     <>
       <Stack.Screen options={{ title: 'Oops!' }} />
       <View style={styles.container}>
         <Text style={styles.text}>This screen doesn't exist.</Text>
-        <Link href="/" style={styles.link}>
+        <Link href={'/(tabs)'} style={styles.link}>
           <Text>Go to home screen!</Text>
         </Link>
       </View>

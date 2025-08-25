@@ -40,5 +40,5 @@ export function useStorage<T>(key: string, defaultValue: T) {
     }
   }
 
-  return { value, setValue: storeValue, removeValue: deleteValue, loading };
+  return { value, loadValue, setValue: storeValue, removeValue: deleteValue, loading };
 }

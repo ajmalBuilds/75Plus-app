@@ -1,5 +1,13 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  RefreshControl,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { useState, useCallback, useEffect } from 'react';
 import { Plus, TrendingUp, Calendar, Clock } from 'lucide-react-native';
 import { Course } from '@/types';
 import { useStorage } from '@/hooks/useStorage';
@@ -7,37 +15,90 @@ import Header from '@/components/Header';
 
 export default function Dashboard() {
   const router = useRouter();
-  const { value: courses } = useStorage<Course[]>('courses', []);
+  const { value: courses, loadValue } = useStorage<Course[]>('userCourses', []);
   const { value: requiredPercentage } = useStorage('requiredPercentage', 75);
+  const [refreshing, setRefreshing] = useState(false);
 
   const totalCourses = courses.length;
-  const averageAttendance = courses.length > 0 
-    ? courses.reduce((sum, course) => {
-        const percentage = course.totalHours > 0 ? (course.presentHours / course.totalHours) * 100 : 0;
-        return sum + percentage;
-      }, 0) / courses.length
-    : 0;
+  
+  const overallTotalHours = courses.reduce(
+    (sum, course) => sum + course.totalHours,
+    0
+  );
+  const overallPresentHours = courses.reduce(
+    (sum, course) => sum + course.presentHours,
+    0
+  );
+  const averageAttendance =
+    overallTotalHours > 0 ? (overallPresentHours / overallTotalHours) * 100 : 0;
 
-  const lowAttendanceCourses = courses.filter(course => {
-    const percentage = course.totalHours > 0 ? (course.presentHours / course.totalHours) * 100 : 0;
+  const lowAttendanceCourses = courses.filter((course) => {
+    const percentage =
+      course.totalHours > 0
+        ? (course.presentHours / course.totalHours) * 100
+        : 0;
     return percentage < requiredPercentage;
   }).length;
 
   const currentTime = new Date();
-  const greeting = currentTime.getHours() < 12 ? 'Good Morning' : 
-                   currentTime.getHours() < 16 ? 'Good Afternoon' : 'Good Evening';
+  const greeting =
+    currentTime.getHours() < 12
+      ? 'Good Morning'
+      : currentTime.getHours() < 16
+      ? 'Good Afternoon'
+      : 'Good Evening';
+  let overallAttendance;
+  if (averageAttendance.toFixed(0) === '100') {
+    overallAttendance = averageAttendance.toFixed(0);
+  } else {
+    overallAttendance = averageAttendance.toFixed(1);
+  }
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Add any refresh logic here
+      await loadValue();
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   return (
     <View style={styles.container}>
       <Header title="75Plus" subtitle={`${greeting}! Track your attendance`} />
-      
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#2563EB']}
+            tintColor="#2563EB"
+          />
+        }
+      >
+
+{lowAttendanceCourses > 0 && (
+          <View style={styles.alertSection}>
+            <Text style={styles.alertTitle}>⚠️ Attention Required</Text>
+            <Text style={styles.alertText}>
+              You have {lowAttendanceCourses} course
+              {lowAttendanceCourses > 1 ? 's' : ''} below {requiredPercentage}%
+              attendance. Tap on "Courses" to see which ones need attention.
+            </Text>
+          </View>
+        )}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <View style={[styles.statIcon, { backgroundColor: '#EFF6FF' }]}>
               <TrendingUp size={24} color="#2563EB" />
             </View>
-            <Text style={styles.statValue}>{averageAttendance.toFixed(1)}%</Text>
+            <Text style={styles.statValue}>{overallAttendance}%</Text>
             <Text style={styles.statLabel}>Overall Attendance</Text>
           </View>
 
@@ -60,7 +121,7 @@ export default function Dashboard() {
 
         <View style={styles.quickActions}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
-          
+
           <TouchableOpacity
             style={styles.actionButton}
             activeOpacity={0.8}
@@ -71,11 +132,13 @@ export default function Dashboard() {
             </View>
             <View style={styles.actionContent}>
               <Text style={styles.actionTitle}>Add New Course</Text>
-              <Text style={styles.actionSubtitle}>Start tracking a new subject</Text>
+              <Text style={styles.actionSubtitle}>
+                Start tracking a new subject
+              </Text>
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.actionButton}
             activeOpacity={0.8}
             onPress={() => router.push('/timetable')}
@@ -85,11 +148,13 @@ export default function Dashboard() {
             </View>
             <View style={styles.actionContent}>
               <Text style={styles.actionTitle}>Manage Timetable</Text>
-              <Text style={styles.actionSubtitle}>View and update your schedule</Text>
+              <Text style={styles.actionSubtitle}>
+                View and update your schedule
+              </Text>
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.actionButton}
             activeOpacity={0.8}
             onPress={() => router.push('/analytics')}
@@ -99,20 +164,14 @@ export default function Dashboard() {
             </View>
             <View style={styles.actionContent}>
               <Text style={styles.actionTitle}>View Analytics</Text>
-              <Text style={styles.actionSubtitle}>Check your attendance trends</Text>
+              <Text style={styles.actionSubtitle}>
+                Check your attendance trends
+              </Text>
             </View>
           </TouchableOpacity>
         </View>
 
-        {lowAttendanceCourses > 0 && (
-          <View style={styles.alertSection}>
-            <Text style={styles.alertTitle}>⚠️ Attention Required</Text>
-            <Text style={styles.alertText}>
-              You have {lowAttendanceCourses} course{lowAttendanceCourses > 1 ? 's' : ''} below {requiredPercentage}% attendance. 
-              Tap on "Courses" to see which ones need attention.
-            </Text>
-          </View>
-        )}
+        
       </ScrollView>
     </View>
   );

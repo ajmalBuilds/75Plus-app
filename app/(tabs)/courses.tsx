@@ -1,16 +1,30 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Alert } from 'react-native';
-import { useState } from 'react';
-import { ChartPie, Plus, X } from 'lucide-react-native';
-import { Course, COURSE_COLORS } from '@/types';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  Modal,
+  Alert,
+  FlatList,
+  RefreshControl,
+} from 'react-native';
+import { useState, useCallback, useEffect } from 'react';
+import { BadgeCheck, ChartPie, Plus, X } from 'lucide-react-native';
+import { Course as CourseType, COURSE_COLORS } from '@/types';
 import { useStorage } from '@/hooks/useStorage';
 import Header from '@/components/Header';
 import AttendanceCard from '@/components/AttendanceCard';
+import { useRouter } from 'expo-router';
 
 export default function Courses() {
-  const { value: courses, setValue: setCourses } = useStorage<Course[]>('courses', []);
-  const { setValue: removeValue } = useStorage<Course[]>('courses', []);
+  const router = useRouter();
+  const { loadValue, value: userCourses, setValue: setUserCourses } = useStorage<
+    CourseType[]
+  >('userCourses', []);
   const { value: requiredPercentage } = useStorage('requiredPercentage', 75);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [newCourse, setNewCourse] = useState({
     name: '',
     courseId: '',
@@ -18,23 +32,58 @@ export default function Courses() {
     presentHours: '',
   });
 
-  const overallTotalHours = courses.reduce((sum, course) => sum + course.totalHours, 0);
-  const overallPresentHours = courses.reduce((sum, course) => sum + course.presentHours, 0);
-  const overallAttendancePercentage = overallTotalHours > 0 ? (overallPresentHours/overallTotalHours) * 100 : 0 ;
-  const calculateRequiredClasses : any  = () => {
+  const overallTotalHours = userCourses.reduce(
+    (sum, course) => sum + course.totalHours,
+    0
+  );
+  const overallPresentHours = userCourses.reduce(
+    (sum, course) => sum + course.presentHours,
+    0
+  );
+  const overallAttendancePercentage =
+    overallTotalHours > 0 ? (overallPresentHours / overallTotalHours) * 100 : 0;
+
+  const calculateRequiredClasses = () => {
     if (overallAttendancePercentage >= requiredPercentage) return 0;
-    return Math.ceil((requiredPercentage * overallTotalHours - 100 * overallPresentHours) / (100 - requiredPercentage));
+    return Math.ceil(
+      (requiredPercentage * overallTotalHours - 100 * overallPresentHours) /
+        (100 - requiredPercentage)
+    );
   };
 
-  const calculateBunkableClasses : any = () => {
+  const calculateBunkableClasses = () => {
     if (overallAttendancePercentage < requiredPercentage) return 0;
-    return Math.floor((100 * overallPresentHours - requiredPercentage * overallTotalHours) / requiredPercentage);
+    return Math.floor(
+      (100 * overallPresentHours - requiredPercentage * overallTotalHours) /
+        requiredPercentage
+    );
   };
 
   const requiredClasses = calculateRequiredClasses();
   const bunkableClasses = calculateBunkableClasses();
 
-  const addCourse = () => {
+  const fetchData = async () => {
+    try {
+      await loadValue();
+
+    } catch (error) {
+      console.error('Error loading courses:', error);
+    }
+  };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Add any refresh logic here
+      await fetchData();
+    } catch (error) {
+      console.error('Refresh error:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  const addManualCourse = () => {
     if (!newCourse.name.trim() || !newCourse.courseId.trim()) {
       Alert.alert('Error', 'Please fill in course name and ID');
       return;
@@ -48,117 +97,233 @@ export default function Courses() {
       return;
     }
 
-    const course: Course = {
-      id: Date.now().toString(),
-      name: newCourse.name.trim(),
+    // Check for duplicate course ID
+    const existingCourse = userCourses.find(course => course.courseId === newCourse.courseId.trim());
+    if (existingCourse) {
+      Alert.alert('Error', 'A course with this ID already exists');
+      return;
+    }
+
+    const course: CourseType = {
+      id: Date.now(),
+      courseName: newCourse.name.trim(),
       courseId: newCourse.courseId.trim(),
       totalHours,
       presentHours,
-      color: COURSE_COLORS[courses.length % COURSE_COLORS.length],
+      color: COURSE_COLORS[userCourses.length % COURSE_COLORS.length],
       createdAt: new Date(),
+      department: 'Custom',
+      year: 'Custom',
+      semester: 'Custom',
     };
 
-    setCourses([...courses, course]);
+    setUserCourses([...userCourses, course]);
     setNewCourse({ name: '', courseId: '', totalHours: '', presentHours: '' });
     setShowAddModal(false);
   };
 
-  const updateCourse = (courseId: string, type: 'total' | 'present', increment: boolean) => {
-    setCourses(courses.map(course => {
-      if (course.id !== courseId) return course;
+  const updateCourse = (
+    courseId: string,
+    type: 'total' | 'present',
+    increment: boolean
+  ) => {
+    setUserCourses(
+      userCourses.map((course) => {
+        if (course.courseId !== courseId) return course;
 
-      if (type === 'total') {
-        const newTotal = increment ? course.totalHours + 1 : Math.max(0, course.totalHours - 1);
-        return {
-          ...course,
-          totalHours: newTotal,
-          presentHours: Math.min(course.presentHours, newTotal)
-        };
-      } else {
-        const newPresent = increment 
-          ? Math.min(course.totalHours, course.presentHours + 1)
-          : Math.max(0, course.presentHours - 1);
-        return {
-          ...course,
-          presentHours: newPresent
-        };
-      }
-    }));
+        if (type === 'total') {
+          const newTotal = increment
+            ? course.totalHours + 1
+            : Math.max(0, course.totalHours - 1);
+          return {
+            ...course,
+            totalHours: newTotal,
+            presentHours: Math.min(course.presentHours, newTotal),
+          };
+        } else {
+          const newPresent = increment
+            ? Math.min(course.totalHours, course.presentHours + 1)
+            : Math.max(0, course.presentHours - 1);
+          return {
+            ...course,
+            presentHours: newPresent,
+          };
+        }
+      })
+    );
+    fetchData();
   };
 
-  return (
-    <View style={styles.container}>
-      <Header title="Courses" subtitle="Attend smart, Bunk Smarter!" />
-      
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+  const deleteEntry = (id: number) => {
+    Alert.alert('Delete Class', 'Are you sure you want to delete this class?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          setUserCourses(userCourses.filter((entry) => entry.id !== id));
+        },
+      },
+    ]);
+  };
 
+  const navigateToAllCourses = () => {
+    setShowAddModal(false);
+    // Get existing course IDs to prevent duplicates
+    const existingCourseIds = userCourses.map((course) => course.id);
+    router.push({
+      pathname: '/allCourses',
+      params: { existingCourseIds: JSON.stringify(existingCourseIds) },
+    });
+  };
+
+  const renderItem = useCallback(({ item }: { item: CourseType }) => (
+    <AttendanceCard
+      course={item}
+      requiredPercentage={requiredPercentage}
+      onIncrement={(type) => updateCourse(item.courseId, type, true)}
+      onDecrement={(type) => updateCourse(item.courseId, type, false)}
+      onLongPress={() => deleteEntry(item.id)}
+    />
+  ), [requiredPercentage, updateCourse, deleteEntry]);
+
+  const keyExtractor = useCallback((item: CourseType) => item.id.toString(), []);
+
+  const renderHeader = () => {
+    if (userCourses.length === 0) return null;
+
+    return (
+      <View>
         <View style={styles.overallStats}>
-          <View style={styles.alertSection}>
-            <Text style={styles.alertTitle}>Overall Attendance</Text>
-            <Text style={styles.alertText}>
-              Your overall attendance is {overallAttendancePercentage.toFixed(2)}%. 
-              You need to maintain at least {requiredPercentage}% attendance.
-            </Text>
-          </View>
+          {overallAttendancePercentage < requiredPercentage ? (
+            <View style={[styles.statusContainer, styles.warningContainer]}>
+              <Text style={styles.alertTitle}>⚠️ Attention Required</Text>
+              <Text
+                style={[
+                  styles.statusTextSuccess,
+                  { color: '#B91C1C' , fontSize: 18, marginBottom: 8},
+                ]}
+              >
+                Your overall attendance is{' '}
+                {overallAttendancePercentage.toFixed(2)}%
+              </Text>
+              <Text style={styles.statusText}>
+                Need to attend {requiredClasses} more classes to reach{' '}{requiredPercentage}%
+              </Text>
+            </View>
+          ) : (
+            <View style={[styles.statusContainer, styles.successContainer]}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 5,
+                  marginBottom: 8,
+                }}
+              >
+                <BadgeCheck
+                  size={26}
+                  color={'#1A6730'}
+                  style={{ alignSelf: 'center' }}
+                />
+                <Text
+                  style={{
+                    fontSize: 14,
+                    color: '#1A6730',
+                    fontWeight: '500',
+                  }}
+                >
+                  You are on right track!
+                </Text>
+              </View>
+              <Text
+                style={[
+                  styles.statusTextSuccess,
+                  { fontSize: 18, marginBottom: 8 },
+                ]}
+              >
+                Your overall attendance is{' '}{overallAttendancePercentage.toFixed(2)}%
+              </Text>
+              <Text style={styles.statusTextSuccess}>
+                You can skip {bunkableClasses} classes and maintain{' '}
+                {requiredPercentage}%
+              </Text>
+            </View>
+          )}
 
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
-            <Text style={{ fontSize: 16, fontWeight: '500', color: '#1E293B' }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              marginBottom: 20,
+            }}
+          >
+            <Text
+              style={{ fontSize: 16, fontWeight: '500', color: '#1E293B' }}
+            >
               Present Hours: {overallPresentHours}
             </Text>
-            <Text style={{ fontSize: 16, fontWeight: '500', color: '#1E293B' }}>
+            <Text
+              style={{ fontSize: 16, fontWeight: '500', color: '#1E293B' }}
+            >
               Total Hours: {overallTotalHours}
             </Text>
           </View>
         </View>
+        <View style={styles.separator}></View>
+      </View>
+    );
+  };
 
-        <View style={styles.seperator}></View>
+  const renderEmpty = () => (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyTitle}>No courses yet</Text>
+      <Text style={styles.emptySubtitle}>
+        Add your first course to start tracking attendance
+      </Text>
+    </View>
+  );
 
-        {overallAttendancePercentage < requiredPercentage ? (
-                <View style={[styles.statusContainer, styles.warningContainer]}>
-                  <Text style={styles.alertTitle}>⚠️ Attention Required</Text>
-                  <Text style={styles.statusText}>
-                    Need to attend {requiredClasses} more classes to reach {requiredPercentage}%
-                  </Text>
-                </View>
-              ) : (
-                <View style={[styles.statusContainer, styles.successContainer]}>
-                  {/* <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                  <ChartPie style={{ color: '#1A6730', marginRight: 4, marginBottom: 8 }} size={16} />
-                  <Text style={styles.statusTextSuccessHeading}>Overall Attendance Percentage: {overallAttendancePercentage.toFixed(2)}</Text>
-                  </View> */}
-                  <Text style={{ fontSize: 14, color: '#1A6730', fontWeight: '500',  marginBottom: 8 }}>
-                    You are on right track!
-                  </Text>
-                  <Text style={styles.statusTextSuccess}>
-                    You can skip {bunkableClasses} classes and maintain {requiredPercentage}%
-                  </Text>
-                </View>
-              )}
-        <View style={{ marginBottom: 100 }}>
-        {courses.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No courses yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Add your first course to start tracking attendance
-            </Text>
-          </View>
-        ) : (
-          courses.map(course => (
-            <AttendanceCard
-              key={course.id}
-              course={course}
-              requiredPercentage={requiredPercentage}
-              onIncrement={(type) => updateCourse(course.id, type, true)}
-              onDecrement={(type) => updateCourse(course.id, type, false)}
-            />
-          ))
-        )}
-        </View>
-      </ScrollView>
+  return (
+    <View style={styles.container}>
+      <Header title="Courses" subtitle="Attend smart, Bunk Smarter!" />
 
-      <TouchableOpacity 
+      <FlatList
+        style={styles.content}
+        data={userCourses}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={renderHeader}
+        ListEmptyComponent={renderEmpty}
+        contentContainerStyle={[
+          styles.contentContainer,
+          userCourses.length === 0 && styles.emptyContainer
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#2563EB']}
+            tintColor="#2563EB"
+          />
+        }
+        initialNumToRender={10}
+        maxToRenderPerBatch={20}
+        windowSize={10}
+        removeClippedSubviews={true}
+        keyboardShouldPersistTaps="handled"
+        getItemLayout={(data, index) => ({
+          length: 120,
+          offset: 120 * index,
+          index,
+        })}
+      />
+
+      <TouchableOpacity
         style={styles.fab}
         onPress={() => setShowAddModal(true)}
+        activeOpacity={0.8}
       >
         <Plus size={24} color="#FFFFFF" />
       </TouchableOpacity>
@@ -167,71 +332,130 @@ export default function Courses() {
         visible={showAddModal}
         animationType="slide"
         presentationStyle="pageSheet"
+        onRequestClose={() => setShowAddModal(false)}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Add New Course</Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setShowAddModal(false)}
+              activeOpacity={0.7}
             >
               <X size={24} color="#64748B" />
             </TouchableOpacity>
           </View>
+          
+          <FlatList
+            style={styles.modalContent}
+            data={[1]} // Dummy data to make FlatList work
+            keyExtractor={() => 'modal-content'}
+            renderItem={() => (
+              <View>
+                <Text style={styles.sectionTitle}>
+                  Choose how to add courses:
+                </Text>
 
-          <View style={styles.modalContent}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Course Name</Text>
-              <TextInput
-                style={styles.input}
-                value={newCourse.name}
-                onChangeText={(text) => setNewCourse(prev => ({ ...prev, name: text }))}
-                placeholder="e.g., Data Structures"
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
+                <TouchableOpacity
+                  style={[styles.addButton, styles.primaryButton]}
+                  onPress={navigateToAllCourses}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.addButtonText}>Browse All Courses</Text>
+                  <Text style={styles.addButtonSubtext}>
+                    Select from 300+ available courses
+                  </Text>
+                </TouchableOpacity>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Course ID</Text>
-              <TextInput
-                style={styles.input}
-                value={newCourse.courseId}
-                onChangeText={(text) => setNewCourse(prev => ({ ...prev, courseId: text }))}
-                placeholder="e.g., CS101"
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
+                <Text style={styles.orText}>OR</Text>
 
-            <View style={styles.inputRow}>
-              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.inputLabel}>Total Hours</Text>
-                <TextInput
-                  style={styles.input}
-                  value={newCourse.totalHours}
-                  onChangeText={(text) => setNewCourse(prev => ({ ...prev, totalHours: text }))}
-                  placeholder="0"
-                  placeholderTextColor="#94A3B8"
-                  keyboardType="numeric"
-                />
+                <TouchableOpacity
+                  style={[styles.addButton, styles.secondaryButton]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.addButtonText, { color: '#2563EB' }]}>
+                    Add Custom Course
+                  </Text>
+                  <Text style={[styles.addButtonSubtext, { color: '#64748B' }]}>
+                    Create your own course entry below
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Manual Course Form */}
+                <View style={styles.manualForm}>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Course Name</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g., Data Structures"
+                      value={newCourse.name}
+                      onChangeText={(text) =>
+                        setNewCourse({ ...newCourse, name: text })
+                      }
+                      placeholderTextColor="#9CA3AF"
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Course ID</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g., CS2101"
+                      value={newCourse.courseId}
+                      onChangeText={(text) =>
+                        setNewCourse({ ...newCourse, courseId: text })
+                      }
+                      placeholderTextColor="#9CA3AF"
+                      autoCapitalize="characters"
+                    />
+                  </View>
+
+                  <View style={styles.inputRow}>
+                    <View
+                      style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}
+                    >
+                      <Text style={styles.inputLabel}>Total Hours</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="0"
+                        value={newCourse.totalHours}
+                        onChangeText={(text) =>
+                          setNewCourse({ ...newCourse, totalHours: text })
+                        }
+                        keyboardType="numeric"
+                        placeholderTextColor="#9CA3AF"
+                      />
+                    </View>
+                    <View
+                      style={[styles.inputGroup, { flex: 1, marginLeft: 10 }]}
+                    >
+                      <Text style={styles.inputLabel}>Present Hours</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="0"
+                        value={newCourse.presentHours}
+                        onChangeText={(text) =>
+                          setNewCourse({ ...newCourse, presentHours: text })
+                        }
+                        keyboardType="numeric"
+                        placeholderTextColor="#9CA3AF"
+                      />
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.addButton, styles.primaryButton, { marginBottom: 50}]}
+                    onPress={addManualCourse}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.addButtonText}>Add Course</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-
-              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                <Text style={styles.inputLabel}>Present Hours</Text>
-                <TextInput
-                  style={styles.input}
-                  value={newCourse.presentHours}
-                  onChangeText={(text) => setNewCourse(prev => ({ ...prev, presentHours: text }))}
-                  placeholder="0"
-                  placeholderTextColor="#94A3B8"
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-
-            <TouchableOpacity style={styles.addButton} onPress={addCourse}>
-              <Text style={styles.addButtonText}>Add Course</Text>
-            </TouchableOpacity>
-          </View>
+            )}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          />
         </View>
       </Modal>
     </View>
@@ -245,12 +469,16 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
     padding: 20,
+    paddingBottom: 100,
   },
-  overallStats: {
-
+  emptyContainer: {
+    flexGrow: 1,
   },
-  seperator: {
+  overallStats: {},
+  separator: {
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
@@ -292,24 +520,11 @@ const styles = StyleSheet.create({
     shadowRadius: 4.65,
     elevation: 8,
   },
-  alertSection: {
-    backgroundColor: '#FEF2F2',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    marginBottom: 40,
-  },
   alertTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#B91C1C',
     marginBottom: 8,
-  },
-  alertText: {
-    fontSize: 14,
-    color: '#B91C1C',
-    lineHeight: 20,
   },
   statusContainer: {
     padding: 12,
@@ -321,25 +536,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FECACA',
   },
-  chatIcon:{
-    color: '#1A6730',
-  },
   successContainer: {
     backgroundColor: '#F0FDF4',
-    borderWidth: 1, 
+    borderWidth: 1,
     borderColor: '#BBF7D0',
   },
   statusText: {
     fontSize: 14,
     color: '#B91C1C',
     fontWeight: '500',
-    textAlign: 'center',
-  },
-  statusTextSuccessHeading: {
-    fontSize: 16,
-    color: '#1A6730',
-    fontWeight: '500',
-    marginBottom: 8,
+    textAlign: 'left',
   },
   statusTextSuccess: {
     fontSize: 14,
@@ -370,7 +576,30 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1E293B',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  primaryButton: {
+    backgroundColor: '#2563EB',
+  },
+  secondaryButton: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  orText: {
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#64748B',
+    marginVertical: 15,
+    fontWeight: '500',
   },
   inputGroup: {
     marginBottom: 20,
@@ -395,15 +624,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   addButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    marginTop: 20,
+    marginBottom: 15,
   },
   addButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+    marginBottom: 4,
+  },
+  addButtonSubtext: {
+    color: '#E2E8F0',
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  manualForm: {
+    marginTop: 30,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
   },
 });

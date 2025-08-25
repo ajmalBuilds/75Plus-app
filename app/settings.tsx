@@ -1,14 +1,15 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Switch, Alert } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Target, Trash2, Info, Moon, Bell } from 'lucide-react-native';
 import { useStorage } from '@/hooks/useStorage';
+import { Course } from '@/types';
 import * as FileSystem from 'expo-file-system';
 import * as FileSharing from 'expo-sharing'
 import Header from '@/components/Header';
 
 export default function Settings() {
-  const { value: requiredPercentage, setValue: setRequiredPercentage } = useStorage('requiredPercentage', 75);
-  const { value: courses, setValue: setCourses } = useStorage<{ totalHours: number }[]>('courses', []);
+  const { value: requiredPercentage, setValue: setRequiredPercentage, loadValue } = useStorage('requiredPercentage', 75);
+  const { value: courses, setValue: setCourses } = useStorage<Course[]>('userCourses', []);
   const { value: timetable, setValue: setTimetable } = useStorage('timetable', []);
   const { value: darkMode, setValue: setDarkMode } = useStorage('darkMode', false);
   const { value: notifications, setValue: setNotifications } = useStorage('notifications', true);
@@ -23,7 +24,13 @@ export default function Settings() {
       return;
     }
     setRequiredPercentage(percentage);
+    
   };
+
+  useEffect(() => {
+    setTempPercentage(requiredPercentage.toString());
+    console.log("Upadated percentage");
+  },[requiredPercentage])
 
   const clearAllData = () => {
     Alert.alert(
@@ -39,6 +46,8 @@ export default function Settings() {
             setTimetable([]);
             setRequiredPercentage(75);
             setTempPercentage('75');
+            setDarkMode(false);
+            setNotifications(true);
             Alert.alert('Success', 'All data has been cleared');
           }
         },
@@ -47,30 +56,42 @@ export default function Settings() {
   };
 
   const exportFile = async (data: any) => {
-    const fileUri = FileSystem.documentDirectory + 'attendance_data.json';
-    await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(data, null, 2));
-    
-    if (await FileSharing.isAvailableAsync()) {
-      await FileSharing.shareAsync(fileUri);
-    } else {
-      Alert.alert('Export Failed', 'File sharing is not available on this device.');
+    try {
+      const fileUri = FileSystem.documentDirectory + 'attendance_data.json';
+      await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(data, null, 2));
+      
+      if (await FileSharing.isAvailableAsync()) {
+        await FileSharing.shareAsync(fileUri);
+      } else {
+        Alert.alert('Export Failed', 'File sharing is not available on this device.');
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      Alert.alert('Export Failed', 'An error occurred while exporting your data.');
     }
-  }
+  };
 
-  
   const exportData = async () => {
     const data = {
-      courses,
-      timetable,
+      courses: courses || [],
+      timetable: timetable || [],
       requiredPercentage,
+      darkMode,
+      notifications,
       exportDate: new Date().toISOString(),
+      version: '1.0.0'
     };
+    
+    const courseCount = courses ? courses.length : 0;
+    const timetableCount = timetable ? timetable.length : 0;
     
     Alert.alert(
       'Export Data',
-      `Export contains:\n• ${courses.length} courses\n• ${timetable.length} timetable entries\n• Settings\n\nData: ${JSON.stringify(data).slice(0, 100)}...`,
+      `Export contains:\n• ${courseCount} courses\n• ${timetableCount} timetable entries\n• All settings\n\nWould you like to proceed?`,
       [
-        { text: 'OK' ,
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Export',
           onPress: async () => {
             try {
               await exportFile(data);
@@ -79,11 +100,15 @@ export default function Settings() {
               Alert.alert('Export Failed', 'An error occurred while exporting your data.');
             }
           }
-         }
+        }
       ]
     );
   };
 
+  // Calculate total hours for courses
+  const totalHours = courses ? courses.reduce((sum, course) => sum + course.totalHours, 0) : 0;
+  const totalPresentHours = courses ? courses.reduce((sum, course) => sum + course.presentHours, 0) : 0;
+  const overallAttendance = totalHours > 0 ? ((totalPresentHours / totalHours) * 100).toFixed(1) : '0.0';
 
   return (
     <View style={styles.container}>
@@ -167,7 +192,7 @@ export default function Settings() {
             <View style={styles.actionContent}>
               <Text style={styles.actionTitle}>Export Data</Text>
               <Text style={styles.actionDescription}>
-                Export your attendance data for backup
+                Export your attendance data for backup or transfer
               </Text>
             </View>
           </TouchableOpacity>
@@ -186,7 +211,38 @@ export default function Settings() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.aboutSection }>
+        {/* Quick Stats Overview */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Info size={20} color="#2563EB" />
+            <Text style={styles.sectionTitle}>Quick Overview</Text>
+          </View>
+          
+          <View style={styles.overviewContainer}>
+            <View style={styles.overviewRow}>
+              <Text style={styles.overviewLabel}>Overall Attendance:</Text>
+              <Text style={[styles.overviewValue, { 
+                color: parseFloat(overallAttendance) >= requiredPercentage ? '#059669' : '#DC2626' 
+              }]}>
+                {overallAttendance}%
+              </Text>
+            </View>
+            <View style={styles.overviewRow}>
+              <Text style={styles.overviewLabel}>Total Classes:</Text>
+              <Text style={styles.overviewValue}>{totalHours}</Text>
+            </View>
+            <View style={styles.overviewRow}>
+              <Text style={styles.overviewLabel}>Classes Attended:</Text>
+              <Text style={[styles.overviewValue, { color: '#059669' }]}>{totalPresentHours}</Text>
+            </View>
+            <View style={styles.overviewRow}>
+              <Text style={styles.overviewLabel}>Classes Missed:</Text>
+              <Text style={[styles.overviewValue, { color: '#DC2626' }]}>{totalHours - totalPresentHours}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.aboutSection}>
           <View style={styles.sectionHeader}>
             <Info size={20} color="#2563EB" />
             <Text style={styles.sectionTitle}>About</Text>
@@ -203,17 +259,15 @@ export default function Settings() {
 
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{courses.length}</Text>
+              <Text style={styles.statValue}>{courses ? courses.length : 0}</Text>
               <Text style={styles.statLabel}>Courses</Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{timetable.length}</Text>
+              <Text style={styles.statValue}>{timetable ? timetable.length : 0}</Text>
               <Text style={styles.statLabel}>Classes</Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {courses.reduce((sum, course) => sum + course.totalHours, 0)}
-              </Text>
+              <Text style={styles.statValue}>{totalHours}</Text>
               <Text style={styles.statLabel}>Total Hours</Text>
             </View>
           </View>
@@ -319,6 +373,36 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12,
   },
+  actionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1E293B',
+    marginBottom: 2,
+  },
+  actionDescription: {
+    fontSize: 14,
+    color: '#64748B',
+  },
+  overviewContainer: {
+    gap: 8,
+  },
+  overviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  overviewLabel: {
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  overviewValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
   aboutSection: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -332,16 +416,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
-  },
-  actionTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1E293B',
-    marginBottom: 2,
-  },
-  actionDescription: {
-    fontSize: 14,
-    color: '#64748B',
   },
   aboutContainer: {
     alignItems: 'center',
